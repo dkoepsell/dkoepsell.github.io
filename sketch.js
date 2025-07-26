@@ -1026,7 +1026,10 @@ function createGUI() {
     loop(); // resumes the draw loop if unpausing
   }
 });
-
+ createButton('Reset').parent(controlRow).mousePressed(resetSimulation);
+  createButton('Download CSV').parent(controlRow).mousePressed(downloadAgentLog);
+  createButton('Download Biographies CSV').parent(controlRow).mousePressed(exportBiographies);
+}
  createButton('Stop').parent(controlRow).mousePressed(() => {
   running = false;
   isPaused = true;          // <-- Add this line
@@ -1035,7 +1038,4 @@ function createGUI() {
    noLoop();
 });
 
-  createButton('Reset').parent(controlRow).mousePressed(resetSimulation);
-  createButton('Download CSV').parent(controlRow).mousePressed(downloadAgentLog);
-  createButton('Download Biographies CSV').parent(controlRow).mousePressed(exportBiographies);
-}
+ 
