@@ -454,23 +454,64 @@ applyAlignmentForce() {
       conflict: this.internalConflict
     });
   }
+computeConflict() {
+  // Conflict = mismatch between norm preference and actual acknowledgment
+  let preferredNorm = this.normPreference;
+  return normTypes.reduce((sum, norm) => {
+    const ack = this[`${norm}Acknowledges`];
+    if (norm === preferredNorm && !ack) sum += 1;
+    if (norm !== preferredNorm && ack) sum += 0.5;
+    return sum;
+  }, 0);
+}
 
-  update() {
+computeDebt() {
+  // Debt = proportion of failed obligations
+  const attempts = this.obligationAttempts || 1;
+  const failed = attempts - (this.obligationSuccesses || 0);
+  return failed / attempts;
+}
+
+ update() {
   let moved = false;
 
-  // Apply targeted trust-seeking only every 2nd frame
-  if (frameCount % 2 === 0) {
-    for (let [id, score] of this.trustMap.entries()) {
-      if (score > 2) {
-        let peer = agentMap.get(parseInt(id));
-        if (peer) {
-          let seek = p5.Vector.sub(peer.pos, this.pos).setMag(0.05 * score);
-          this.applyForce(seek);
-          moved = true;
-        }
+  for (let [id, score] of this.trustMap.entries()) {
+    if (score > 2) {
+      let peer = agentMap.get(parseInt(id));
+      if (peer) {
+        let seek = p5.Vector.sub(peer.pos, this.pos).setMag(0.05 * score);
+        this.applyForce(seek);
+        moved = true;
       }
     }
   }
+
+  this.applySeparationForce();
+  this.applyCohesionForce();
+  this.applyAlignmentForce();
+
+  if (!moved) {
+    this.wander.rotate(random(-0.1, 0.1));
+    this.applyForce(this.wander.copy().mult(0.03));
+  }
+
+  this.acc.limit(0.2);
+  this.vel.add(this.acc);
+  this.vel.mult(0.95);
+  this.vel.limit(1.5);
+  this.pos.add(this.vel);
+  this.acc.mult(0.6);
+
+  let targetColor = getNormColor(this.normPreference, this[`${this.normPreference}Acknowledges`]);
+  this.displayColor = lerpColor(this.displayColor, targetColor, 0.05);
+
+  this.wrapAround();
+
+  // ✅ Update conflict and debt each frame
+  this.internalConflict = this.computeConflict();
+  this.contradictionDebt = this.computeDebt();
+}
+
 
   // Spatial behaviors every 3rd frame (cohesion, separation, alignment)
   if (frameCount % 3 === 0) {
@@ -575,31 +616,65 @@ class ObligationVector {
 
 
   enforce() {
-    if (!this.source[this.normType + 'Acknowledges'] || !this.target[this.normType + 'Acknowledges']) {
-      return;
-    }
+  this.age++;
 
-    let dist = p5.Vector.dist(this.source.pos, this.target.pos);
-    if (dist < 150 && !this.fulfilled) {
-      this.source.obligationAttempts++;
-      this.source.obligationSuccesses++;
-      this.source.recordTrust(this.target.id, true);
-      this.fulfilled = true;
-    }
+  if (!this.source || !this.target) return;
 
-    let force = p5.Vector.sub(this.target.pos, this.source.pos);
-    force.setMag(this.strength);
-    this.source.applyForce(force);
-obligationLog.push({
-  status: 'fulfilled',
-  norm: this.normType,
-  from: this.source.id,
-  to: this.target.id,
-  generation: generation
-});
+  const norm = this.normType;
+  const source = this.source;
+  const target = this.target;
 
+  if (this.fulfilled) return;
+
+  const key = `${target.id}_${generation}`;
+
+  if (this.age >= this.expiration) {
+    source.relationalLedger.set(key, 'expired');
+    obligationLog.push({
+      status: 'expired',
+      norm: norm,
+      from: source.id,
+      to: target.id,
+      generation
+    });
+    return;
   }
+
+  if (!source[`${norm}Acknowledges`] || !target[`${norm}Acknowledges`]) {
+    source.obligationAttempts++;
+    source.recordTrust(target.id, false);
+    source.relationalLedger.set(key, 'denied');
+    obligationLog.push({
+      status: 'denied',
+      norm: norm,
+      from: source.id,
+      to: target.id,
+      generation
+    });
+    return;
+  }
+
+  let dist = p5.Vector.dist(source.pos, target.pos);
+  if (dist < 150 && !this.fulfilled) {
+    source.obligationAttempts++;
+    source.obligationSuccesses++;
+    source.recordTrust(target.id, true);
+    this.fulfilled = true;
+    source.relationalLedger.set(key, 'fulfilled');
+    obligationLog.push({
+      status: 'fulfilled',
+      norm: norm,
+      from: source.id,
+      to: target.id,
+      generation
+    });
+  }
+
+  let force = p5.Vector.sub(target.pos, source.pos);
+  force.setMag(this.strength);
+  source.applyForce(force);
 }
+
 
 function exportBiographies() {
   let rows = [];
