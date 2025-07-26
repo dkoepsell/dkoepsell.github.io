@@ -1009,11 +1009,12 @@ function createGUI() {
     running = !isPaused;
   });
 
-  createButton('Stop').parent(controlRow).mousePressed(() => {
-    running = false;
-    generateInterpretiveSummary();
-    showInterpretivePopup();
-  });
+ createButton('Stop').parent(controlRow).mousePressed(() => {
+  running = false;
+  isPaused = true;          // <-- Add this line
+  generateInterpretiveSummary();
+  showInterpretivePopup();
+});
 
   createButton('Reset').parent(controlRow).mousePressed(resetSimulation);
   createButton('Download CSV').parent(controlRow).mousePressed(downloadAgentLog);
