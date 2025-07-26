@@ -234,20 +234,20 @@ function generateInterpretiveSummary() {
 
 function evolveGeneration() {
   // 🪦 Aging and Death
-agents = agents.filter(agent => {
-  const age = generation - (agent.birthGeneration ?? 0);
-  const baseDeathRate = 0.05;
-  const conflictPenalty = Math.min(agent.internalConflict * 0.01, 0.1);
-  const deathChance = baseDeathRate + conflictPenalty + (age > 5 ? 0.05 * (age - 5) : 0);
+  agents = agents.filter(agent => {
+    const age = generation - (agent.birthGeneration ?? 0);
+    const baseDeathRate = 0.05;
+    const conflictPenalty = Math.min(agent.internalConflict * 0.01, 0.1);
+    const deathChance = baseDeathRate + conflictPenalty + (age > 5 ? 0.05 * (age - 5) : 0);
 
-  if (random() < deathChance) {
-    log.push(`Agent #${agent.id} died @ Gen ${generation} (age ${age})`);
-    return false; // remove agent
-  }
-  return true; // keep agent
-});
+    if (random() < deathChance) {
+      log.push(`Agent #${agent.id} died @ Gen ${generation} (age ${age})`);
+      return false; // remove agent
+    }
+    return true; // keep agent
+  });
 
-agentMap.clear();
+  agentMap.clear();
   for (let a of agents) agentMap.set(a.id, a);
 
   generation++;
@@ -255,7 +255,8 @@ agentMap.clear();
   generateObligations(); // Refresh obligations each generation
 
   for (let agent of agents) {
-    agent.recordBiography(generation); // Store generation snapshot
+    agent.update();  // ✅ This must come before logging values like conflict/debt
+    agent.recordBiography(generation);
 
     // Track fulfilled and failed obligations
     const ledger = [...agent.relationalLedger.values()];
@@ -332,6 +333,7 @@ agentMap.clear();
 
   agents = agents.concat(offspring);
 }
+
 
 class Agent {
   constructor(id) {
