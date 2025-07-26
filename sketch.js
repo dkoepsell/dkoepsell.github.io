@@ -62,16 +62,21 @@ smooth(); // disables smoothing of drawn shapes
 }
 
 function draw() {
+  // Throttle rendering for performance (every other frame)
+  if (frameCount % 2 !== 0) return;
+
   background(245);
 
-  // Update global agent map for quick lookup
+  // Update global agent map
   agentMap.clear();
   for (let a of agents) agentMap.set(a.id, a);
 
-  drawTraitBars();
+  // Draw trait bars and metrics less frequently (every 10 frames)
+  if (frameCount % 10 === 0) drawTraitBars();
+
+  // Draw labels on every frame (lightweight)
   drawLabels();
 
-  // Pause mode: render state but don't advance simulation
   if (isPaused) {
     for (let vec of obligationVectors) vec.display();
     for (let agent of agents) agent.display();
@@ -79,42 +84,27 @@ function draw() {
     return;
   }
 
-  // Enforce and display obligation vectors
-  for (let vec of obligationVectors) {
-    vec.enforce();
-    vec.display();
+  // Obligation vectors: enforce only some, display all
+  for (let i = 0; i < obligationVectors.length; i++) {
+    if (i % 2 === frameCount % 2) {
+      obligationVectors[i].enforce();  // stagger enforcement
+    }
+    obligationVectors[i].display();    // always display
   }
 
   // Update and display agents
   for (let agent of agents) {
-   
-      agent.update();
-
-    agent.display();
+    agent.update();   // handles motion + cohesion/alignment
+    agent.display();  // render circles
   }
 
-  // Tooltip on hover
-  for (let agent of agents) {
-    if (dist(mouseX, mouseY, agent.pos.x, agent.pos.y) < agent.r) {
-      fill(255);
-      stroke(100);
-      rect(mouseX + 10, mouseY - 10, 160, 70, 8);
-      noStroke();
-      fill(0);
-      textSize(11);
-      textAlign(LEFT, TOP);
-      text(`Agent #${agent.id}
-Norm: ${agent.normPreference}
-Trust: ${agent.trustMap?.size ?? 0}
-Debt: ${agent.contradictionDebt?.toFixed(2) ?? 0}
-Conflict: ${agent.internalConflict?.toFixed(2) ?? 0}`, mouseX + 14, mouseY - 6);
-      break;
-    }
+  // Tooltip hover only when mouse is moved
+  if (mouseMovedInLast10Frames()) {
+    showAgentTooltip();
   }
 
   drawLegend();
 
-  // Advance simulation if not paused
   if (running) {
     generationTimer++;
     if (generationTimer >= generationInterval) {
@@ -123,6 +113,7 @@ Conflict: ${agent.internalConflict?.toFixed(2) ?? 0}`, mouseX + 14, mouseY - 6);
     }
   }
 }
+
 
 
 function downloadAgentLog() {
