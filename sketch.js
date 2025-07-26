@@ -458,38 +458,48 @@ applyAlignmentForce() {
   update() {
   let moved = false;
 
-  for (let [id, score] of this.trustMap.entries()) {
-    if (score > 2) {
-      let peer = agentMap.get(parseInt(id));
-      if (peer) {
-        let seek = p5.Vector.sub(peer.pos, this.pos).setMag(0.05 * score);
-        this.applyForce(seek);
-        moved = true;
+  // Apply targeted trust-seeking only every 2nd frame
+  if (frameCount % 2 === 0) {
+    for (let [id, score] of this.trustMap.entries()) {
+      if (score > 2) {
+        let peer = agentMap.get(parseInt(id));
+        if (peer) {
+          let seek = p5.Vector.sub(peer.pos, this.pos).setMag(0.05 * score);
+          this.applyForce(seek);
+          moved = true;
+        }
       }
     }
   }
 
-  this.applySeparationForce();
-  this.applyCohesionForce();
-  this.applyAlignmentForce();
+  // Spatial behaviors every 3rd frame (cohesion, separation, alignment)
+  if (frameCount % 3 === 0) {
+    this.applySeparationForce();
+    this.applyCohesionForce();
+    this.applyAlignmentForce();
+  }
 
-  if (!moved) {
+  // Wandering fallback
+  if (!moved && frameCount % 4 === 0) {
     this.wander.rotate(random(-0.1, 0.1));
     this.applyForce(this.wander.copy().mult(0.03));
   }
 
+  // Motion integration
   this.acc.limit(0.2);
   this.vel.add(this.acc);
-  this.vel.mult(0.95);
+  this.vel.mult(0.95); // damping
   this.vel.limit(1.5);
   this.pos.add(this.vel);
   this.acc.mult(0.6);
 
+  // Smooth transition for display color
   let targetColor = getNormColor(this.normPreference, this[`${this.normPreference}Acknowledges`]);
   this.displayColor = lerpColor(this.displayColor, targetColor, 0.05);
 
   this.wrapAround();
 }
+
 
   wrapAround() {
     let marginLeft = 180;
