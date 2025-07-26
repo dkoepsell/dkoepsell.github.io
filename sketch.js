@@ -129,6 +129,12 @@ function downloadAgentLog() {
   link.attribute('download', `agentLog_${scenario}.csv`);
   link.hide();
   link.elt.click(); 
+   let summaryRow = table.addRow();
+  summaryRow.set('id', 'summary'); // Label row
+  summaryRow.set('summaryNote', interpretiveSummary ?? 'No summary available');
+
+  saveTable(table, `agentLog_${scenario}_${Date.now()}.csv`);
+}
 } 
 
 function windowResized() {
