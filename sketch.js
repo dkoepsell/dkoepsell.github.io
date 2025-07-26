@@ -54,8 +54,8 @@ function setup() {
   loadScenario(scenario);
   generateObligations();
   logGeneration();
-frameRate(90);
-noSmooth(); // disables smoothing of drawn shapes
+frameRate(60);
+smooth(); // disables smoothing of drawn shapes
  pixelDensity(1);  // prevent high-DPI doubling
   running = true;
   loop();
