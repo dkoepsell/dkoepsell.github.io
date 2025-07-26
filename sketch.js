@@ -20,6 +20,7 @@ let guiPanel;
 let summaryPopup;
 let agentMap = new Map(); // also required globally
 let globalAgentIndex = 0; // ensures unique agent IDs
+let generationSummaryLog = []; // For per-generation CSV output
 
 const MAX_AGENTS = 1000;
 
@@ -66,6 +67,7 @@ function draw() {
   if (frameCount % 2 !== 0) return;
 
   background(245);
+drawConflictDebtChart();
 
   // Update global agent map
   agentMap.clear();
@@ -232,6 +234,7 @@ function generateInterpretiveSummary() {
   `;
 }
 
+// 🔁 EXTENDED evolveGeneration()
 function evolveGeneration() {
   // 🪦 Aging and Death
   agents = agents.filter(agent => {
@@ -242,9 +245,9 @@ function evolveGeneration() {
 
     if (random() < deathChance) {
       log.push(`Agent #${agent.id} died @ Gen ${generation} (age ${age})`);
-      return false; // remove agent
+      return false;
     }
-    return true; // keep agent
+    return true;
   });
 
   agentMap.clear();
@@ -252,10 +255,10 @@ function evolveGeneration() {
 
   generation++;
   logGeneration();
-  generateObligations(); // Refresh obligations
+  generateObligations();
 
   for (let agent of agents) {
-    agent.update(); // ✅ REQUIRED: updates conflict, debt, etc.
+    agent.update(); // ✅ REQUIRED for current metrics
     agent.recordBiography(generation);
 
     const ledger = [...agent.relationalLedger.values()];
@@ -264,7 +267,6 @@ function evolveGeneration() {
     const expired = ledger.filter(v => v === 'expired').length;
     const repaired = ledger.filter(v => v === 'repaired').length;
 
-    // Track norm changes
     for (let norm of normTypes) {
       const key = `${norm}Acknowledges`;
       if (agent[key] !== agent.lastAcknowledgments[norm]) {
@@ -298,6 +300,20 @@ function evolveGeneration() {
     });
   }
 
+  // 📊 Generation Summary Logging
+  const genObligations = obligationLog.filter(o => o.generation === generation);
+  generationSummaryLog.push({
+    generation,
+    obligations: genObligations.length,
+    fulfilled: genObligations.filter(o => o.status === 'fulfilled').length,
+    denied: genObligations.filter(o => o.status === 'denied').length,
+    expired: genObligations.filter(o => o.status === 'expired').length,
+    repaired: genObligations.filter(o => o.status === 'repaired').length,
+    avgConflict: (agents.reduce((sum, a) => sum + (a.internalConflict ?? 0), 0) / agents.length).toFixed(3),
+    avgDebt: (agents.reduce((sum, a) => sum + (a.contradictionDebt ?? 0), 0) / agents.length).toFixed(3),
+    population: agents.length
+  });
+
   // 🧬 Reproduction
   let offspring = [];
 
@@ -329,6 +345,41 @@ function evolveGeneration() {
   }
 
   agents = agents.concat(offspring);
+}
+// 📈 Visualization in draw()
+function drawConflictDebtChart() {
+  const h = 120;
+  const w = 300;
+  const x0 = 20;
+  const y0 = height - h - 20;
+
+  noFill();
+  stroke(0);
+  rect(x0, y0, w, h);
+
+  strokeWeight(1.5);
+  stroke('red');
+  beginShape();
+  for (let i = 0; i < generationSummaryLog.length; i++) {
+    let y = map(generationSummaryLog[i].avgConflict, 0, 5, y0 + h, y0);
+    let x = map(i, 0, generationSummaryLog.length, x0, x0 + w);
+    vertex(x, y);
+  }
+  endShape();
+
+  stroke('blue');
+  beginShape();
+  for (let i = 0; i < generationSummaryLog.length; i++) {
+    let y = map(generationSummaryLog[i].avgDebt, 0, 1, y0 + h, y0);
+    let x = map(i, 0, generationSummaryLog.length, x0, x0 + w);
+    vertex(x, y);
+  }
+  endShape();
+
+  fill(0);
+  noStroke();
+  textSize(10);
+  text('Conflict (red), Debt (blue)', x0 + 5, y0 + 12);
 }
 
 class Agent {
