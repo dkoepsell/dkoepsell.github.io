@@ -252,20 +252,19 @@ function evolveGeneration() {
 
   generation++;
   logGeneration();
-  generateObligations(); // Refresh obligations each generation
+  generateObligations(); // Refresh obligations
 
   for (let agent of agents) {
-    agent.update();  // ✅ This must come before logging values like conflict/debt
+    agent.update(); // ✅ REQUIRED: updates conflict, debt, etc.
     agent.recordBiography(generation);
 
-    // Track fulfilled and failed obligations
     const ledger = [...agent.relationalLedger.values()];
     const fulfilled = ledger.filter(v => v === 'fulfilled').length;
     const denied = ledger.filter(v => v === 'denied').length;
     const expired = ledger.filter(v => v === 'expired').length;
     const repaired = ledger.filter(v => v === 'repaired').length;
 
-    // Log norm changes
+    // Track norm changes
     for (let norm of normTypes) {
       const key = `${norm}Acknowledges`;
       if (agent[key] !== agent.lastAcknowledgments[norm]) {
@@ -274,7 +273,6 @@ function evolveGeneration() {
       }
     }
 
-    // Log per-agent data
     agentLog.push({
       generation,
       scenario,
@@ -290,7 +288,9 @@ function evolveGeneration() {
       debt: agent.contradictionDebt ?? 0,
       momentum: agent.culturalMomentum?.toFixed(3) ?? 0,
       trustCount: agent.trustMap?.size ?? 0,
-      trustMax: Math.max(...(agent.trustMap?.values?.() ?? [0])),
+      trustMax: agent.trustMap && agent.trustMap.size > 0
+        ? Math.max(...agent.trustMap.values())
+        : 0,
       fulfilled,
       denied,
       expired,
@@ -298,7 +298,7 @@ function evolveGeneration() {
     });
   }
 
-  // 🧬 Reproduction logic
+  // 🧬 Reproduction
   let offspring = [];
 
   for (let i = 0; i < agents.length; i++) {
@@ -306,7 +306,6 @@ function evolveGeneration() {
       let parent = agents[i];
       let child = new Agent(globalAgentIndex++);
 
-      // Mutate norm acknowledgments
       let mutationRate = 0.05 + 0.1 * parent.internalConflict;
       for (let norm of normTypes) {
         let key = `${norm}Acknowledges`;
@@ -315,12 +314,10 @@ function evolveGeneration() {
           : random() > 0.5;
       }
 
-      // Inherit or randomize norm preference
       child.normPreference = (random() < 0.75)
         ? parent.normPreference
         : random(normTypes);
 
-      // Inherit and jitter momentum
       child.culturalMomentum = constrain(
         (parent.culturalMomentum ?? 0.5) + random(-0.1, 0.1),
         0.1,
@@ -333,7 +330,6 @@ function evolveGeneration() {
 
   agents = agents.concat(offspring);
 }
-
 
 class Agent {
   constructor(id) {
