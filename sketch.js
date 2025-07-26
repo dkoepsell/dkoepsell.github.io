@@ -1004,16 +1004,20 @@ function createGUI() {
     .style('justify-content', 'center')
     .style('gap', '8px');
 
-  createButton('Pause/Resume').parent(controlRow).mousePressed(() => {
-    isPaused = !isPaused;
-    running = !isPaused;
-  });
+ createButton('Pause/Resume').parent(controlRow).mousePressed(() => {
+  isPaused = !isPaused;
+  running = !isPaused;
+  if (!isPaused) {
+    loop(); // resumes the draw loop if unpausing
+  }
+});
 
  createButton('Stop').parent(controlRow).mousePressed(() => {
   running = false;
   isPaused = true;          // <-- Add this line
   generateInterpretiveSummary();
   showInterpretivePopup();
+   noLoop();
 });
 
   createButton('Reset').parent(controlRow).mousePressed(resetSimulation);
