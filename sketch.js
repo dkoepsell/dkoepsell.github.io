@@ -64,7 +64,7 @@ smooth(); // disables smoothing of drawn shapes
 
 function draw() {
   // Throttle rendering for performance (every other frame)
-  if (frameCount % 2 !== 0) return;
+ 
 
   background(245);
 drawConflictDebtChart();
@@ -448,7 +448,7 @@ applyCohesionForce() {
   if (total > 0) {
     center.div(total);
     let desired = p5.Vector.sub(center, this.pos);
-    desired.setMag(0.02); // small attractive force
+    desired.setMag(0.05); // small attractive force
     this.applyForce(desired);
   }
 }
@@ -466,7 +466,7 @@ applyAlignmentForce() {
 
   if (total > 0) {
     avgVel.div(total);
-    avgVel.setMag(0.02); // gentle matching
+    avgVel.setMag(0.05); // gentle matching
     this.applyForce(avgVel);
   }
 }
@@ -488,7 +488,7 @@ applyAlignmentForce() {
 
     if (total > 0) {
       steer.div(total);
-      steer.setMag(0.05); // tweak for more or less separation
+      steer.setMag(0.08); // tweak for more or less separation
       this.applyForce(steer);
     }
   }
@@ -553,7 +553,7 @@ computeDebt() {
   this.acc.limit(0.2);
   this.vel.add(this.acc);
   this.vel.mult(0.95);
-  this.vel.limit(1.5);
+  this.vel.limit(2.5);
   this.pos.add(this.vel);
   this.acc.mult(0.6);
 
