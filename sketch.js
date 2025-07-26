@@ -741,7 +741,22 @@ function exportBiographies() {
       });
     }
   }
-  // Convert to CSV or JSON and trigger download
+  if (rows.length === 0) return;
+
+  // Get all unique keys for the CSV header
+  let keys = Object.keys(rows[0]);
+  let csv = keys.join(',') + '\n';
+
+  for (let row of rows) {
+    csv += keys.map(k => JSON.stringify(row[k] ?? '')).join(',') + '\n';
+  }
+
+  let blob = new Blob([csv], { type: 'text/csv' });
+  let url = URL.createObjectURL(blob);
+  let link = createA(url, 'Download Biographies');
+  link.attribute('download', `biographies_${Date.now()}.csv`);
+  link.hide();
+  link.elt.click();
 }
 
 
@@ -1022,4 +1037,5 @@ function createGUI() {
 
   createButton('Reset').parent(controlRow).mousePressed(resetSimulation);
   createButton('Download CSV').parent(controlRow).mousePressed(downloadAgentLog);
+  createButton('Download Biographies CSV').parent(controlRow).mousePressed(exportBiographies);
 }
