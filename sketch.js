@@ -64,7 +64,7 @@ smooth(); // smoothing of drawn shapes
 function draw() {
   background(245);
 
-  // Update global agent map for quick lookup
+  // Update global agent map
   agentMap.clear();
   for (let a of agents) agentMap.set(a.id, a);
 
@@ -76,10 +76,11 @@ function draw() {
     for (let vec of obligationVectors) vec.display();
     for (let agent of agents) agent.display();
     drawLegend();
+    drawDebtConflictGraph();  // Show graph even when paused
     return;
   }
 
-  // Enforce and display obligation vectors
+  // Enforce and display obligations
   for (let vec of obligationVectors) {
     vec.enforce();
     vec.display();
@@ -87,9 +88,7 @@ function draw() {
 
   // Update and display agents
   for (let agent of agents) {
-   
-      agent.update();
-
+    agent.update();
     agent.display();
   }
 
@@ -113,8 +112,9 @@ Conflict: ${agent.internalConflict?.toFixed(2) ?? 0}`, mouseX + 14, mouseY - 6);
   }
 
   drawLegend();
+  drawDebtConflictGraph();  // ✅ Live tension graph
 
-  // Advance simulation if not paused
+  // Advance simulation
   if (running) {
     generationTimer++;
     if (generationTimer >= generationInterval) {
@@ -129,6 +129,7 @@ function downloadAgentLog() {
   let csv = 'Generation,Scenario,ID,NormPref,A Priori,Legal,Care,Epistemic,Attempts,Successes,Conflict,Debt,Momentum,TrustCount,TrustMax,Fulfilled,Denied,Expired,Repaired\n';
   for (let row of agentLog) {
     csv += `${row.generation},${row.scenario},${row.id},${row.normPref},${row.aprioriAck},${row.legalAck},${row.careAck},${row.epistemicAck},${row.attempts},${row.successes},${row.conflict},${row.debt},${row.momentum},${row.trustCount},${row.trustMax},${row.fulfilled},${row.denied},${row.expired},${row.repairs}\n`;
+
   }
   let blob = new Blob([csv], { type: 'text/csv' });
   let url = URL.createObjectURL(blob);
@@ -144,6 +145,7 @@ function windowResized() {
 
 function resetSimulation() {
   falsifyFlags = [];
+  interpretiveSummary = '';
   log = [];
   agentLog = [];
   obligationLog = [];
@@ -227,6 +229,8 @@ function generateInterpretiveSummary() {
     - Internal Conflict: ${latest.avgConflict || 'n/a'}<br>
     - Repair Events: ${repairEvents}<br>
     - Avg Trust Connections: ${avgTrustSize}<br><br>
+    - Trust Alignment (Same Norm): ${latest.normTrustAlignment}<br>
+
 
     <strong>📚 Norm Acknowledgment:</strong><br>
     ${normSpread}<br><br>
@@ -238,37 +242,39 @@ function generateInterpretiveSummary() {
 
 function evolveGeneration() {
   // 🪦 Aging and Death
-agents = agents.filter(agent => {
-  const age = generation - (agent.birthGeneration ?? 0);
-  const baseDeathRate = 0.05;
-  const conflictPenalty = Math.min(agent.internalConflict * 0.01, 0.1);
-  const deathChance = baseDeathRate + conflictPenalty + (age > 5 ? 0.05 * (age - 5) : 0);
+  agents = agents.filter(agent => {
+    const age = generation - (agent.birthGeneration ?? 0);
+    const baseDeathRate = 0.05;
+    const conflictPenalty = Math.min(agent.internalConflict * 0.01, 0.1);
+    const deathChance = baseDeathRate + conflictPenalty + (age > 5 ? 0.05 * (age - 5) : 0);
 
-  if (random() < deathChance) {
-    log.push(`Agent #${agent.id} died @ Gen ${generation} (age ${age})`);
-    return false; // remove agent
-  }
-  return true; // keep agent
-});
+    if (random() < deathChance) {
+      log.push(`Agent #${agent.id} died @ Gen ${generation} (age ${age})`);
+      return false;
+    }
+    return true;
+  });
 
-agentMap.clear();
+  // 🔄 Update agentMap
+  agentMap.clear();
   for (let a of agents) agentMap.set(a.id, a);
 
   generation++;
-  logGeneration();
-  generateObligations(); // Refresh obligations each generation
+  logGeneration();            // Log system-wide averages
+  generateObligations();      // Refresh obligations
 
   for (let agent of agents) {
-    agent.recordBiography(generation); // Store generation snapshot
+    agent.recordBiography(generation);
+    agent.updateConflictAndDebt();
 
-    // Track fulfilled and failed obligations
+    // Track ledger outcomes
     const ledger = [...agent.relationalLedger.values()];
     const fulfilled = ledger.filter(v => v === 'fulfilled').length;
     const denied = ledger.filter(v => v === 'denied').length;
     const expired = ledger.filter(v => v === 'expired').length;
     const repaired = ledger.filter(v => v === 'repaired').length;
 
-    // Log norm changes
+    // Track norm acknowledgment changes
     for (let norm of normTypes) {
       const key = `${norm}Acknowledges`;
       if (agent[key] !== agent.lastAcknowledgments[norm]) {
@@ -277,7 +283,7 @@ agentMap.clear();
       }
     }
 
-    // Log per-agent data
+    // Log individual agent state
     agentLog.push({
       generation,
       scenario,
@@ -301,9 +307,26 @@ agentMap.clear();
     });
   }
 
-  // 🧬 Reproduction logic
-  let offspring = [];
+  // ♻️ Moral Repair
+  if (enableMoralRepair) {
+    for (let agent of agents) {
+      for (let [targetID, status] of agent.relationalLedger.entries()) {
+        if ((status === 'denied' || status === 'expired') && random() < 0.1) {
+          agent.relationalLedger.set(targetID, 'repaired');
+          obligationLog.push({
+            status: 'repaired',
+            norm: 'n/a',
+            from: agent.id,
+            to: targetID,
+            generation
+          });
+        }
+      }
+    }
+  }
 
+  // 👶 Reproduction
+  let offspring = [];
   for (let i = 0; i < agents.length; i++) {
     if (random() < 0.25 && agents.length + offspring.length < MAX_AGENTS) {
       let parent = agents[i];
@@ -318,12 +341,12 @@ agentMap.clear();
           : random() > 0.5;
       }
 
-      // Inherit or randomize norm preference
+      // Inherit or mutate norm preference
       child.normPreference = (random() < 0.75)
         ? parent.normPreference
         : random(normTypes);
 
-      // Inherit and jitter momentum
+      // Jitter momentum
       child.culturalMomentum = constrain(
         (parent.culturalMomentum ?? 0.5) + random(-0.1, 0.1),
         0.1,
@@ -382,43 +405,45 @@ class Agent {
   applyForce(force) {
     this.acc.add(force);
   }
-applyCohesionForce() {
-  let total = 0;
-  let center = createVector();
 
-  for (let other of agents) {
-    let d = p5.Vector.dist(this.pos, other.pos);
-    if (other !== this && d < 60) {
-      center.add(other.pos);
-      total++;
+  applyCohesionForce() {
+    let total = 0;
+    let center = createVector();
+
+    for (let other of agents) {
+      let d = p5.Vector.dist(this.pos, other.pos);
+      if (other !== this && d < 60) {
+        center.add(other.pos);
+        total++;
+      }
+    }
+
+    if (total > 0) {
+      center.div(total);
+      let desired = p5.Vector.sub(center, this.pos);
+      desired.setMag(0.02); // small attractive force
+      this.applyForce(desired);
     }
   }
 
-  if (total > 0) {
-    center.div(total);
-    let desired = p5.Vector.sub(center, this.pos);
-    desired.setMag(0.02); // small attractive force
-    this.applyForce(desired);
-  }
-}
-applyAlignmentForce() {
-  let total = 0;
-  let avgVel = createVector();
+  applyAlignmentForce() {
+    let total = 0;
+    let avgVel = createVector();
 
-  for (let other of agents) {
-    let d = p5.Vector.dist(this.pos, other.pos);
-    if (other !== this && d < 60) {
-      avgVel.add(other.vel);
-      total++;
+    for (let other of agents) {
+      let d = p5.Vector.dist(this.pos, other.pos);
+      if (other !== this && d < 60) {
+        avgVel.add(other.vel);
+        total++;
+      }
+    }
+
+    if (total > 0) {
+      avgVel.div(total);
+      avgVel.setMag(0.02); // gentle matching
+      this.applyForce(avgVel);
     }
   }
-
-  if (total > 0) {
-    avgVel.div(total);
-    avgVel.setMag(0.02); // gentle matching
-    this.applyForce(avgVel);
-  }
-}
 
   applySeparationForce() {
     let total = 0;
@@ -442,6 +467,18 @@ applyAlignmentForce() {
     }
   }
 
+  updateConflictAndDebt() {
+    let conflict = 0;
+    let debt = 0;
+
+    for (let status of this.relationalLedger?.values?.() ?? []) {
+      if (status === 'denied') conflict++;
+      if (status === 'expired') debt++;
+    }
+
+    this.internalConflict = conflict;
+    this.contradictionDebt = debt;
+  }
 
   recordBiography(gen) {
     this.biography.push({
@@ -460,40 +497,40 @@ applyAlignmentForce() {
   }
 
   update() {
-  let moved = false;
+    let moved = false;
 
-  for (let [id, score] of this.trustMap.entries()) {
-    if (score > 2) {
-      let peer = agentMap.get(parseInt(id));
-      if (peer) {
-        let seek = p5.Vector.sub(peer.pos, this.pos).setMag(0.05 * score);
-        this.applyForce(seek);
-        moved = true;
+    for (let [id, score] of this.trustMap.entries()) {
+      if (score > 2) {
+        let peer = agentMap.get(parseInt(id));
+        if (peer) {
+          let seek = p5.Vector.sub(peer.pos, this.pos).setMag(0.05 * score);
+          this.applyForce(seek);
+          moved = true;
+        }
       }
     }
+
+    this.applySeparationForce();
+    this.applyCohesionForce();
+    this.applyAlignmentForce();
+
+    if (!moved) {
+      this.wander.rotate(random(-0.1, 0.1));
+      this.applyForce(this.wander.copy().mult(0.03));
+    }
+
+    this.acc.limit(0.2);
+    this.vel.add(this.acc);
+    this.vel.mult(0.95);
+    this.vel.limit(1.5);
+    this.pos.add(this.vel);
+    this.acc.mult(0.6);
+
+    let targetColor = getNormColor(this.normPreference, this[`${this.normPreference}Acknowledges`]);
+    this.displayColor = lerpColor(this.displayColor, targetColor, 0.05);
+
+    this.wrapAround();
   }
-
-  this.applySeparationForce();
-  this.applyCohesionForce();
-  this.applyAlignmentForce();
-
-  if (!moved) {
-    this.wander.rotate(random(-0.1, 0.1));
-    this.applyForce(this.wander.copy().mult(0.03));
-  }
-
-  this.acc.limit(0.2);
-  this.vel.add(this.acc);
-  this.vel.mult(0.95);
-  this.vel.limit(1.5);
-  this.pos.add(this.vel);
-  this.acc.mult(0.6);
-
-  let targetColor = getNormColor(this.normPreference, this[`${this.normPreference}Acknowledges`]);
-  this.displayColor = lerpColor(this.displayColor, targetColor, 0.05);
-
-  this.wrapAround();
-}
 
   wrapAround() {
     let marginLeft = 180;
@@ -507,7 +544,7 @@ applyAlignmentForce() {
     if (this.pos.y > height - marginBottom) this.pos.y = marginTop;
   }
 
- display() {
+  display() {
     fill(this.displayColor);
     push();
     translate(this.pos.x, this.pos.y);
@@ -522,8 +559,6 @@ applyAlignmentForce() {
     text(this.id, 0, 0);
     pop();
   }
-
-
 
   recordTrust(targetID, fulfilled) {
     let current = this.trustMap.get(targetID) || 0;
@@ -542,94 +577,145 @@ class ObligationVector {
     this.expiration = 10 + floor(random(10));
   }
 
- display() {
-  let baseColor;
-  switch (this.normType) {
-    case 'legal': baseColor = color(128, 0, 128); break;
-    case 'apriori': baseColor = color(0, 0, 255); break;
-    case 'care': baseColor = color(0, 150, 0); break;
-    case 'epistemic': baseColor = color(255, 165, 0); break;
-    default: baseColor = color(120);
-  }
+  display() {
+    let baseColor;
+    switch (this.normType) {
+      case 'legal': baseColor = color(128, 0, 128); break;
+      case 'apriori': baseColor = color(0, 0, 255); break;
+      case 'care': baseColor = color(0, 150, 0); break;
+      case 'epistemic': baseColor = color(255, 165, 0); break;
+      default: baseColor = color(120);
+    }
 
-  let alpha = this.fulfilled ? 50 : 30; // 🟡 reduce opacity
-  if (!this.fulfilled && this.age >= this.expiration) {
-    drawingContext.setLineDash([3, 6]); // expired: dashed
-    alpha = 20;
-  } else if (!this.fulfilled && !this.target[`${this.normType}Acknowledges`]) {
-    drawingContext.setLineDash([8, 4]); // denial: longer dashes
-    alpha = 25;
-  } else {
+    let alpha = this.fulfilled ? 50 : 30;
+
+    if (!this.fulfilled && this.age >= this.expiration) {
+      drawingContext.setLineDash([3, 6]);
+      alpha = 20;
+    } else if (!this.fulfilled && !this.target[`${this.normType}Acknowledges`]) {
+      drawingContext.setLineDash([8, 4]);
+      alpha = 25;
+    } else {
+      drawingContext.setLineDash([]);
+    }
+
+    stroke(baseColor.levels[0], baseColor.levels[1], baseColor.levels[2], alpha);
+    strokeWeight(this.fulfilled ? 1.2 : 0.7);
+    line(this.source.pos.x, this.source.pos.y, this.target.pos.x, this.target.pos.y);
     drawingContext.setLineDash([]);
   }
 
-  stroke(baseColor.levels[0], baseColor.levels[1], baseColor.levels[2], alpha);
-  strokeWeight(this.fulfilled ? 1.2 : 0.7);  // 🔹 thinner lines
-  line(this.source.pos.x, this.source.pos.y, this.target.pos.x, this.target.pos.y);
-  drawingContext.setLineDash([]);
-}
-
-
   enforce() {
+    let dist = p5.Vector.dist(this.source.pos, this.target.pos);
+
     if (!this.source[this.normType + 'Acknowledges'] || !this.target[this.normType + 'Acknowledges']) {
+      if (!this.source.relationalLedger.has(this.target.id)) {
+        this.source.relationalLedger.set(this.target.id, 'denied');
+        obligationLog.push({
+          status: 'denied',
+          norm: this.normType,
+          from: this.source.id,
+          to: this.target.id,
+          generation: generation
+        });
+      }
       return;
     }
 
-    let dist = p5.Vector.dist(this.source.pos, this.target.pos);
+    if (!this.fulfilled && this.age >= this.expiration) {
+      if (!this.source.relationalLedger.has(this.target.id)) {
+        this.source.relationalLedger.set(this.target.id, 'expired');
+        obligationLog.push({
+          status: 'expired',
+          norm: this.normType,
+          from: this.source.id,
+          to: this.target.id,
+          generation: generation
+        });
+      }
+      return;
+    }
+
     if (dist < 150 && !this.fulfilled) {
       this.source.obligationAttempts++;
       this.source.obligationSuccesses++;
       this.source.recordTrust(this.target.id, true);
+      this.source.relationalLedger.set(this.target.id, 'fulfilled');
       this.fulfilled = true;
+
+      obligationLog.push({
+        status: 'fulfilled',
+        norm: this.normType,
+        from: this.source.id,
+        to: this.target.id,
+        generation: generation
+      });
     }
 
     let force = p5.Vector.sub(this.target.pos, this.source.pos);
     force.setMag(this.strength);
     this.source.applyForce(force);
-obligationLog.push({
-  status: 'fulfilled',
-  norm: this.normType,
-  from: this.source.id,
-  to: this.target.id,
-  generation: generation
-});
 
+    this.age++;
   }
-}
+} // ✅ Closing brace added
 
-function exportBiographies() {
-  let rows = [];
+
+function logGeneration() {
+  // Track system-wide totals
+  let totalConflict = 0;
+  let totalDebt = 0;
+  let totalObligationsIssued = 0;
+  let totalFulfilled = 0;
+  let totalDenied = 0;
+  let totalExpired = 0;
+  let totalRepaired = 0;
+
   for (let agent of agents) {
-    for (let entry of agent.biography) {
-      rows.push({
-        id: agent.id,
-        ...entry
-      });
-    }
+    totalConflict += agent.internalConflict || 0;
+    totalDebt += agent.contradictionDebt || 0;
+
+    const ledger = [...agent.relationalLedger.values()];
+    totalObligationsIssued += ledger.length;
+    totalFulfilled += ledger.filter(v => v === 'fulfilled').length;
+    totalDenied += ledger.filter(v => v === 'denied').length;
+    totalExpired += ledger.filter(v => v === 'expired').length;
+    totalRepaired += ledger.filter(v => v === 'repaired').length;
   }
-  // Convert to CSV or JSON and trigger download
-}
 
+  let avgConflict = agents.length > 0 ? totalConflict / agents.length : 0;
+  let avgDebt = agents.length > 0 ? totalDebt / agents.length : 0;
 
-function logGeneration(emergentNorms = 0) {
-  let fulfilled = obligationLog.filter(o => o.status === 'fulfilled').length;
-  let total = obligationLog.length;
-  let avgRI = agents.length > 0
-    ? agents.reduce((sum, a) => sum + (a.obligationAttempts > 0 ? a.obligationSuccesses / a.obligationAttempts : 0), 0) / agents.length
+  let fulfillmentRate = totalObligationsIssued > 0
+    ? totalFulfilled / totalObligationsIssued
     : 0;
-  let avgDebt = agents.length > 0 ? agents.reduce((sum, a) => sum + a.contradictionDebt, 0) / agents.length : 0;
-  let avgConflict = agents.length > 0 ? agents.reduce((sum, a) => sum + a.internalConflict, 0) / agents.length : 0;
-  let repairEvents = obligationLog.filter(o => o.status === 'repaired').length;
+
+  let avgRI = (totalFulfilled + totalDenied + totalExpired) > 0
+    ? totalFulfilled / (totalFulfilled + totalDenied + totalExpired)
+    : 0;
+
+  let repairEvents = totalRepaired;
+
+  // Optional: placeholder until you define an actual function
+  let emergentNorms = 0; // or call computeEmergentNorms() if defined
 
   log.push({
     generation,
-    fulfillmentRate: total > 0 ? (fulfilled / total).toFixed(2) : 0,
-    avgRI: avgRI.toFixed(2),
-    avgDebt: avgDebt.toFixed(2),
-    avgConflict: avgConflict.toFixed(2),
+    avgConflict,
+    avgDebt,
+    totalObligationsIssued,
+    totalFulfilled,
+    totalDenied,
+    totalExpired,
+    totalRepaired,
+    fulfillmentRate,
+    avgRI,
     repairEvents,
     emergentNorms
   });
+
+  // Optional: console debugging
+  console.log(`Gen ${generation} | Fulfillment: ${fulfillmentRate.toFixed(2)} | RI: ${avgRI.toFixed(2)} | Conflict: ${avgConflict.toFixed(2)} | Debt: ${avgDebt.toFixed(2)}`);
 }
 
 
@@ -653,10 +739,42 @@ function loadScenario(type) {
       },
       utopian: () => normTypes.forEach(norm => agent[`${norm}Acknowledges`] = true),
       collapsed: () => normTypes.forEach(norm => agent[`${norm}Acknowledges`] = false),
-      anomic: () => normTypes.forEach(norm => agent[`${norm}Acknowledges`] = random() > 0.1)
+      anomic: () => normTypes.forEach(norm => agent[`${norm}Acknowledges`] = random() > 0.1),
+
+      // 🔽 NEW SCENARIOS BELOW
+
+      allCare: () => {
+        normTypes.forEach(norm => agent[`${norm}Acknowledges`] = (norm === 'care'));
+        agent.normPreference = 'care';
+      },
+      allLegal: () => {
+        normTypes.forEach(norm => agent[`${norm}Acknowledges`] = (norm === 'legal'));
+        agent.normPreference = 'legal';
+      },
+      noApriori: () => {
+        normTypes.forEach(norm => agent[`${norm}Acknowledges`] = (norm !== 'apriori'));
+        if (agent.normPreference === 'apriori') {
+          agent.normPreference = random(['care', 'legal', 'epistemic']);
+        }
+      },
+      asymmetryOnly: () => {
+        normTypes.forEach(norm => agent[`${norm}Acknowledges`] = false);
+        if (random() < 0.5) {
+          let n = random(normTypes);
+          agent[`${n}Acknowledges`] = true;
+          agent.normPreference = n;
+        } else {
+          agent.normPreference = random(normTypes);
+        }
+      },
+      genocideShock: () => {
+        normTypes.forEach(norm => agent[`${norm}Acknowledges`] = false);
+        agent.normPreference = random(normTypes);
+      }
     };
+
+    // Apply the selected scenario logic
     settings[type]?.();
-    agent.normPreference = random(normTypes);
   }
 }
 
@@ -834,6 +952,61 @@ function downloadObligationLog() {
   link.elt.click();
 }
 
+function drawDebtConflictGraph() {
+  const graphWidth = 260;
+  const graphHeight = 80;
+  const xOffset = width - graphWidth - 20;  // move to right
+const yOffset = 40;                       // near top
+
+
+  const maxPoints = Math.floor(graphWidth / 3);
+  const recentLog = log.slice(-maxPoints);
+
+  // Dynamically scale Y-axis
+ let maxConflict = Math.max(...recentLog.map(e => parseFloat(e.avgConflict ?? 0)), 0.01);
+let maxDebt = Math.max(...recentLog.map(e => parseFloat(e.avgDebt ?? 0)), 0.01);
+let yMax = Math.max(maxConflict, maxDebt);
+
+
+  // Background panel
+  noStroke();
+  fill(255, 240);
+  rect(xOffset - 10, yOffset - 30, graphWidth + 20, graphHeight + 50, 12);
+
+  // Axis label
+  fill(0);
+  textSize(10);
+  text("Conflict / Debt (scaled)", xOffset, yOffset - 12);
+
+  // 🔴 Conflict curve
+  noFill();
+  stroke(200, 50, 50);
+  beginShape();
+  for (let i = 0; i < recentLog.length; i++) {
+    let val = recentLog[i].avgConflict ?? 0;
+    let y = map(val, 0, yMax, yOffset + graphHeight, yOffset);
+    vertex(xOffset + i * 3, y);
+  }
+  endShape();
+
+  // 🔵 Debt curve
+  stroke(50, 50, 200);
+  beginShape();
+  for (let i = 0; i < recentLog.length; i++) {
+    let val = recentLog[i].avgDebt ?? 0;
+    let y = map(val, 0, yMax, yOffset + graphHeight, yOffset);
+    vertex(xOffset + i * 3, y);
+  }
+  endShape();
+
+  // Legend
+  noStroke();
+  fill(200, 50, 50);
+  text("Conflict", xOffset, yOffset + graphHeight + 12);
+  fill(50, 50, 200);
+  text("Debt", xOffset + 80, yOffset + graphHeight + 12);
+}
+
 
 function createGUI() {
   guiPanel = createDiv().id('guiPanel')
@@ -854,16 +1027,18 @@ function createGUI() {
     .style('gap', '8px')
     .style('margin-bottom', '12px');
 
-  ['pluralist', 'authoritarian', 'utopian', 'collapsed', 'anomic'].forEach(type => {
-    createButton(type)
-      .parent(scenarioRow)
-      .style('padding', '6px 16px')
-      .style('font-size', '14px')
-      .mousePressed(() => {
-        scenario = type;
-        resetSimulation();
-      });
-  });
+ ['pluralist', 'authoritarian', 'utopian', 'collapsed', 'anomic',
+ 'allCare', 'allLegal', 'noApriori', 'asymmetryOnly', 'genocideShock'].forEach(type => {
+  createButton(type)
+    .parent(scenarioRow)
+    .style('padding', '6px 16px')
+    .style('font-size', '14px')
+    .mousePressed(() => {
+      scenario = type;
+      resetSimulation();
+    });
+});
+
 
   createP('🧪 <strong>Toggle Experiments</strong>').parent(guiPanel).style('margin-bottom', '8px');
   let experimentRow = createDiv().parent(guiPanel)
